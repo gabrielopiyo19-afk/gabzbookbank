@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Bank - Textbook Catalog</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        .book-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .book-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.12)!important;
+        }
+        .book-cover {
+            height: 220px;
+            object-fit: cover;
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+<body class="bg-light">
+
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm mb-4">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="catalog.html">
+                <i class="bi bi-journal-bookmark-fill me-2"></i>Book Bank System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="catalog.html">Catalog</a>
+                    </li>
+                </ul>
+                <div class="d-flex align-items-center text-white">
+                    <a href="student_dashboard.php" class="btn btn-light btn-sm me-2">View Reservations</a>
+                    <a href="reservation_slip.php" class="btn btn-outline-light btn-sm me-2">View Latest Slip</a>
+                    <a href="logout.php" class="btn btn-outline-light btn-sm">Logout</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container pb-5">
+        
+        <div id="alertContainer"></div>
+
+        <div class="card p-3 shadow-sm mb-4">
+            <div class="row g-3">
+                <div class="col-md-7">
+                    <div class="input-group">
+                        <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                        <input type="text" id="searchInput" class="form-control" placeholder="Search by title, author, or ISBN..." onkeyup="filterBooks()">
+                    </div>
+                </div>
+                <div class="col-md-5">
+                    <select class="form-select" id="departmentSelect" onchange="filterBooks()">
+                        <option value="all" selected>All Departments</option>
+                        <option value="cse">Computer Science & Engineering</option>
+                        <option value="ee">Electrical Engineering</option>
+                        <option value="me">Mechanical Engineering</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0 fw-bold text-secondary">Available Textbooks</h4>
+            <span class="badge bg-secondary fs-6" id="bookCount">0 Books Found</span>
+        </div>
+
+        <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4" id="booksGrid">
+            </div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        let csrfToken = null;
+        document.addEventListener("DOMContentLoaded", async function() {
+            try {
+                const response = await fetch('get_csrf.php');
+                const data = await response.json();
+                if (data.status === 'success') csrfToken = data.csrf_token;
+            } catch (_) { /* Reservations require an authenticated student session. */ }
+            loadBooks();
+        });
+
+        function loadBooks() {
+            const department = document.getElementById('departmentSelect').value;
+            const search = document.getElementById('searchInput').value;
+
+            const url = `get_books.php?department=${encodeURIComponent(department)}&search=${encodeURIComponent(search)}`;
+
+            fetch(url)
+                .then(response => response.json())
+                .then(result => {
+                    if (result.status === 'success') {
+                        renderBooks(result.data);
+                        document.getElementById('bookCount').textContent = `${result.count} Book${result.count !== 1 ? 's' : ''} Found`;
+                    } else {
+                        console.error('Failed to retrieve catalog:', result);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching catalog:', error);
+                    document.getElementById('booksGrid').innerHTML = `
+                        <div class="col-12 text-center text-danger py-5">
+                            <i class="bi bi-exclamation-triangle fs-1"></i>
+                            <p class="mt-2">Failed to load textbooks. Please check server/database connection.</p>
+                        </div>`;
+                });
+        }
+
+        let searchTimeout = null;
+        function filterBooks() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                loadBooks();
+            }, 300);
+        }
+
+        function renderBooks(books) {
+            const grid = document.getElementById('booksGrid');
+            grid.innerHTML = '';
+
+            if (books.length === 0) {
+                grid.innerHTML = `
+                    <div class="col-12 text-center text-muted py-5">
+                        <i class="bi bi-journal-x fs-1"></i>
+                        <p class="mt-2">No textbooks found matching your query.</p>
+                    </div>`;
+                return;
+            }
+
+            books.forEach(book => {
+                const isAvailable = parseInt(book.available_copies) > 0;
+                const coverImage = safeImageUrl(book.cover_image, book.isbn);
+
+                const cardHtml = `
+                    <div class="col">
+                        <div class="card h-100 shadow-sm book-card">
+                            <img src="${coverImage}" class="card-img-top book-cover" alt="${escapeHtml(book.title)}">
+                            <div class="card-body d-flex flex-column">
+                                <span class="badge bg-info text-dark text-uppercase mb-2 align-self-start">${escapeHtml(book.department)}</span>
+                                <h6 class="card-title text-truncate fw-bold mb-1" title="${escapeHtml(book.title)}">${escapeHtml(book.title)}</h6>
+                                <p class="card-text text-muted small mb-2">By ${escapeHtml(book.author)}</p>
+                                <p class="card-text small text-secondary mb-3"><i class="bi bi-barcode me-1"></i>ISBN: ${escapeHtml(book.isbn)}</p>
+                                
+                                <div class="mt-auto">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span class="small fw-semibold">Copies Available:</span>
+                                        <span class="badge ${isAvailable ? 'bg-success' : 'bg-danger'}">
+                                            ${escapeHtml(book.available_copies)} / ${escapeHtml(book.total_copies)}
+                                        </span>
+                                    </div>
+                                    <button class="btn btn-primary btn-sm w-100 reserve-button" ${!isAvailable ? 'disabled' : ''}>
+                                        ${isAvailable ? '<i class="bi bi-bookmark-plus me-1"></i> Reserve Book' : 'Out of Stock'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = cardHtml;
+                const cover = wrapper.querySelector('.book-cover');
+                cover.addEventListener('error', () => {
+                    cover.src = 'https://via.placeholder.com/200x260?text=No+Cover';
+                }, { once: true });
+                wrapper.querySelector('.reserve-button').addEventListener('click', () => reserveBook(Number(book.book_id), String(book.title ?? 'this book')));
+                grid.appendChild(wrapper.firstElementChild);
+            });
+        }
+
+        function escapeHtml(value) {
+            const node = document.createElement('div');
+            node.textContent = String(value ?? '');
+            return node.innerHTML;
+        }
+
+        function safeImageUrl(value, isbn) {
+            const fallback = isbn
+                ? `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(String(isbn).replace(/[^0-9Xx]/g, ''))}-L.jpg?default=false`
+                : 'https://via.placeholder.com/200x260?text=No+Cover';
+            try {
+                const url = new URL(value || fallback, window.location.href);
+                return ['http:', 'https:'].includes(url.protocol) ? url.href : fallback;
+            } catch (_) {
+                return fallback;
+            }
+        }
+
+        function reserveBook(bookId, title) {
+            if (!confirm(`Are you sure you want to reserve "${title}"?`)) {
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('book_id', bookId);
+            if (!csrfToken) {
+                showAlert('Please sign in as a student to reserve books.', 'danger');
+                return;
+            }
+            formData.append('csrf_token', csrfToken);
+
+            fetch('process_reservation.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                showAlert(data.message, data.status === 'success' ? 'success' : 'danger');
+                if (data.status === 'success') {
+                    loadBooks(); // Refresh catalog to update available copy count
+                    showSlipLink(data.slip_url);
+                }
+            })
+            .catch(error => {
+                console.error('Error reserving book:', error);
+                showAlert('An error occurred while processing your request.', 'danger');
+            });
+        }
+
+        function showAlert(message, type) {
+            const container = document.getElementById('alertContainer');
+            container.innerHTML = `
+                <div class="alert alert-${type} alert-dismissible fade show shadow-sm" role="alert">
+                    <i class="bi ${type === 'success' ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'} me-2"></i>
+                    ${escapeHtml(message)}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>`;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function showSlipLink(url) {
+            if (!url) return;
+            const container = document.getElementById('alertContainer');
+            const link = document.createElement('a');
+            link.href = url;
+            link.className = 'btn btn-success mt-2';
+            link.textContent = 'View Digital Reservation Slip';
+            container.appendChild(link);
+        }
+    </script>
+</body>
+</html>
